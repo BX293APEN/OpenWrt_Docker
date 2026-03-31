@@ -1,0 +1,51 @@
+# YAMLはスペース2つ
+# name: project1                            # プロジェクト名(全て小文字)
+services:                                   # 作成したいコンテナを列挙
+  linux:                                    # 作成するコンテナの名前(docker composeで管理する名前)
+    env_file: .env
+    
+    container_name: ${CONTAINER_NAME}       # 外部から見た時の名前
+    
+    # IPアドレスの確認 
+    # docker inspect --format="{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" [${CONTAINER_NAME}の値]
+
+    hostname: ${CONTAINER_NAME}             # ホスト名
+
+    build: 
+      context: ${Dockerfile_DIR}
+      dockerfile: ${Dockerfile}             # Dockerfileへの相対パス
+      args:                                 # Dockerfile内の環境変数を設定
+        ENTRY_POINT:  ${ENTRY_POINT}
+        ENTRY_DIR:    ${ENTRY_DIR}
+
+    volumes:                                # マウント
+      - ${VOLUME}/overlay:/overlay
+      - ${VOLUME}/var:/var
+      # - ${VOLUME}/www:/www
+
+    restart: no                             # unless-stopped always ...
+    privileged: true
+
+    command:                                # サービスコンテナが起動したときに実行するコマンド
+      - /${ENTRY_DIR}/${ENTRY_POINT}
+    
+    ports:                                  # ポートを接続
+      - "8080:80"                           # ホストマシンのポート番号:コンテナのポート番号
+      # - "8443:443"                         # HTTPS無効 (証明書未設定のため)
+    networks:
+      - docker_eth
+
+
+networks:
+  default:
+    external: true
+    name: bridge
+
+  docker_eth:
+    name: ${NETWORK_NAME}
+    driver: bridge
+    ipam:
+      driver: default
+      config:                               # 物理ネットワークに直接接続したい場合は実環境に合わせる
+        - subnet: ${IP_SUBNET_ADDR}/${IP_PREFIX}
+          gateway: ${IP_GATEWAY_ADDR}
