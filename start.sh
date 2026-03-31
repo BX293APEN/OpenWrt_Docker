@@ -24,6 +24,8 @@ mkdir -p /tmp/resolv.conf.d
 touch /tmp/resolv.conf.d/resolv.conf.auto
 ln -sf /tmp/resolv.conf.d/resolv.conf.auto /tmp/resolv.conf
 
+/sbin/procd &
+
 # ---- LuCI テーマ修正 ----
 # openwrt2020 は sysauth.ut を持たないため bootstrap に変更する
 uci set luci.main.mediaurlbase='/luci-static/bootstrap'
@@ -41,6 +43,10 @@ sleep 1   # ubus ソケットが生成されるまで待つ
 /sbin/rpcd -s /var/run/ubus/ubus.sock -t 30 &
 sleep 2
 
+/sbin/netifd start &
+
+chmod 777 -R /www
+
 # ---- uhttpd 起動 ----
 # こちらも USE_PROCD=1 のため直接実行。
 # /etc/config/uhttpd の設定を読まずにコマンド引数で最低限指定する。
@@ -57,6 +63,7 @@ sleep 2
 
 echo "ubusd / rpcd / uhttpd started."
 
+/etc/init.d/dnsmasq start
 # コンテナを生かし続ける
 while true; do
     sleep 3600
