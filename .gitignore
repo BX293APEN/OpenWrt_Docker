@@ -1,1 +1,5 @@
-*.sock
+build/
+*.img
+*.img.gz
+*.tar.gz
+*.tar.xz
