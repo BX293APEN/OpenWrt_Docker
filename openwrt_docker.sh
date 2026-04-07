@@ -107,6 +107,8 @@ OPENWRT_TZ="${OPENWRT_TZ:-JST-9}"
 
 # ── SSH ──
 SSH_PORT="${SSH_PORT:-22}"
+WAN_SSH="${WAN_SSH:-false}"
+WAN_SSH_ALLOW_IP="${WAN_SSH_ALLOW_IP:-}"
 
 # ── 認証 ──
 ROOT_PASSWORD="${ROOT_PASSWORD:-password}"
@@ -250,15 +252,25 @@ WAN6EOF
 log "ネットワーク設定完了: LAN=${LAN_IP}/${LAN_NETMASK}, WAN=${WAN_PROTO}"
 
 # ── 3-2. SSH設定 (Dropbear) /etc/config/dropbear ─────────────────────────
-cat > "${CUSTOM}/etc/config/dropbear" << SSHEOF
+# WAN_SSH=true の場合は Interface 制限を外す（全NICで待ち受け）
+if [[ "${WAN_SSH}" == "true" ]]; then
+    cat > "${CUSTOM}/etc/config/dropbear" << SSHEOF
+config dropbear
+    option PasswordAuth 'on'
+    option RootPasswordAuth 'on'
+    option Port '${SSH_PORT}'
+SSHEOF
+    log "SSH設定完了: port=${SSH_PORT} (WAN開放モード)"
+else
+    cat > "${CUSTOM}/etc/config/dropbear" << SSHEOF
 config dropbear
     option PasswordAuth 'on'
     option RootPasswordAuth 'on'
     option Port '${SSH_PORT}'
     option Interface 'lan'
 SSHEOF
-
-log "SSH設定完了: port=${SSH_PORT}"
+    log "SSH設定完了: port=${SSH_PORT} (LANのみ)"
+fi
 
 # ── 3-3. タイムゾーン設定 /etc/config/system ────────────────────────────
 cat > "${CUSTOM}/etc/config/system" << SYSEOF
@@ -304,6 +316,25 @@ uci commit system
 # ── SSH: DropBear の鍵生成（未生成の場合） ──
 [ -f /etc/dropbear/dropbear_rsa_host_key ] || dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
 [ -f /etc/dropbear/dropbear_ed25519_host_key ] || dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key
+
+# ── WAN SSH ファイアウォール設定 ──
+# WAN_SSH=true のときのみ firewall に穴を開ける
+# OpenWrtのfirewall4はUCIで管理する
+if [ '${WAN_SSH}' = 'true' ]; then
+    # WAN → device 向けのSSH許可ルールを追加
+    uci add firewall rule
+    uci set firewall.@rule[-1].name='Allow-WAN-SSH'
+    uci set firewall.@rule[-1].src='wan'
+    uci set firewall.@rule[-1].dest_port='${SSH_PORT}'
+    uci set firewall.@rule[-1].proto='tcp'
+    uci set firewall.@rule[-1].target='ACCEPT'
+    uci set firewall.@rule[-1].family='ipv4'
+    # 接続元IPが指定されていれば追加
+    if [ -n '${WAN_SSH_ALLOW_IP}' ]; then
+        uci set firewall.@rule[-1].src_ip='${WAN_SSH_ALLOW_IP}'
+    fi
+    uci commit firewall
+fi
 
 exit 0
 UCIEOF

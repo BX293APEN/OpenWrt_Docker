@@ -53,6 +53,8 @@ services:
       - OPENWRT_TZ=${OPENWRT_TZ}
       # ── SSH ──
       - SSH_PORT=${SSH_PORT}
+      - WAN_SSH=${WAN_SSH}
+      - WAN_SSH_ALLOW_IP=${WAN_SSH_ALLOW_IP}
       # ── 認証 ──
       - ROOT_PASSWORD=${ROOT_PASSWORD}
 
