@@ -4,8 +4,8 @@
 #
 # 役割:
 #   1. OpenWrt ImageBuilder をダウンロード
-#   2. 追加パッケージ（nano, NetworkManager相当, openssh, 日本語等）を指定
-#   3. カスタムファイル（ネットワーク設定・SSH設定等）を注入
+#   2. 追加パッケージ(nano, NetworkManager相当, openssh, 日本語等)を指定
+#   3. カスタムファイル(ネットワーク設定・SSH設定等)を注入
 #   4. make image でビルド
 #   5. /build/openwrt-rootfs.tar.gz を出力
 #
@@ -181,9 +181,9 @@ else
 fi
 
 # ─────────────────────────────────────────────
-# 3. カスタムファイル（files/）の準備
+# 3. カスタムファイル(files/)の準備
 #    ImageBuilder の files/ ディレクトリに置いたファイルは
-#    rootfs に直接展開される（/etc/config/ 等に上書き可）
+#    rootfs に直接展開される(/etc/config/ 等に上書き可)
 # ─────────────────────────────────────────────
 log "カスタムファイル準備中..."
 
@@ -218,7 +218,7 @@ if [[ -n "${LAN_GATEWAY}" ]]; then
     echo "    option gateway '${LAN_GATEWAY}'" >> "${CUSTOM}/etc/config/network"
 fi
 
-# DNS設定（カンマ区切り → スペース区切りに変換）
+# DNS設定(カンマ区切り → スペース区切りに変換)
 LAN_DNS_SPACE="${LAN_DNS//,/ }"
 echo "    list dns '${LAN_DNS_SPACE}'" >> "${CUSTOM}/etc/config/network"
 
@@ -252,7 +252,7 @@ WAN6EOF
 log "ネットワーク設定完了: LAN=${LAN_IP}/${LAN_NETMASK}, WAN=${WAN_PROTO}"
 
 # ── 3-2. SSH設定 (Dropbear) /etc/config/dropbear ─────────────────────────
-# WAN_SSH=true の場合は Interface 制限を外す（全NICで待ち受け）
+# WAN_SSH=true の場合は Interface 制限を外す(全NICで待ち受け)
 if [[ "${WAN_SSH}" == "true" ]]; then
     cat > "${CUSTOM}/etc/config/dropbear" << SSHEOF
 config dropbear
@@ -292,7 +292,7 @@ SYSEOF
 
 log "タイムゾーン設定完了: ${OPENWRT_TZ}"
 
-# ── 3-4. UCI defaults スクリプト（起動時に一度だけ実行） ─────────────────
+# ── 3-4. UCI defaults スクリプト(起動時に一度だけ実行) ─────────────────
 # rootパスワード・日本語入力・その他の初回設定
 cat > "${CUSTOM}/etc/uci-defaults/99-custom-setup.sh" << UCIEOF
 #!/bin/sh
@@ -313,7 +313,7 @@ uci set system.@system[0].zonename='Asia/Tokyo'
 uci set system.@system[0].timezone='${OPENWRT_TZ}'
 uci commit system
 
-# ── SSH: DropBear の鍵生成（未生成の場合） ──
+# ── SSH: DropBear の鍵生成(未生成の場合) ──
 [ -f /etc/dropbear/dropbear_rsa_host_key ] || dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
 [ -f /etc/dropbear/dropbear_ed25519_host_key ] || dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key
 
@@ -345,8 +345,8 @@ log "UCI defaults スクリプト設定完了"
 # ─────────────────────────────────────────────
 # 4. インストールするパッケージリスト
 #
-# OpenWrt の "NetworkManager" 相当は netifd（デフォルト組み込み）
-# + luci（Web UI）+ luci-proto-* が担う。
+# OpenWrt の "NetworkManager" 相当は netifd(デフォルト組み込み)
+# + luci(Web UI)+ luci-proto-* が担う。
 # 別途 network-manager パッケージ は OpenWrt には存在しないため、
 # OpenWrt ネイティブの netifd ベースで設定する。
 # ─────────────────────────────────────────────
@@ -412,7 +412,7 @@ PACKAGES="\
     luci-app-uhttpd \
 "
 
-# ── 日本語入力（fcitx/mozc等はOpenWrtにないため、端末での日本語表示に対応） ──
+# ── 日本語入力(fcitx/mozc等はOpenWrtにないため、端末での日本語表示に対応) ──
 # OpenWrtはGUI非対応のため、端末エンコーディング対応のみ行う
 # lcgi/UTF-8対応は luci-i18n-* パッケージで対応済み
 
@@ -426,16 +426,16 @@ log "パッケージリスト決定完了"
 
 # ─────────────────────────────────────────────
 # 5. イメージビルド
-#    make image で以下が生成される（x86/64の場合）:
+#    make image で以下が生成される(x86/64の場合):
 #      bin/targets/x86/64/openwrt-x86-64-generic-ext4-combined-efi.img.gz
 #      bin/targets/x86/64/openwrt-x86-64-generic-squashfs-combined-efi.img.gz
 #      bin/targets/x86/64/openwrt-x86-64-rootfs.tar.gz  ← これを使う
 # ─────────────────────────────────────────────
-log "イメージビルド開始（数分〜数十分かかります）..."
+log "イメージビルド開始(数分〜数十分かかります)..."
 
 cd "${IB_DIR}"
 
-# パッケージリスト整形（改行・余分スペース除去）
+# パッケージリスト整形(改行・余分スペース除去)
 PKG_LIST=$(echo "${PACKAGES}" | tr '\n' ' ' | sed 's/  */ /g' | xargs)
 
 make image \
@@ -467,8 +467,8 @@ else
 fi
 
 # ディスクイメージの選択
-#   x86_64 → ext4 combined-efi を優先（USB書き込みに最適）
-#   rpi*   → factory イメージを優先（SDカード / USB 書き込み用）
+#   x86_64 → ext4 combined-efi を優先(USB書き込みに最適)
+#   rpi*   → factory イメージを優先(SDカード / USB 書き込み用)
 case "${DEVICE_PROFILE}" in
     x86_64)
         IMG_GZ=$(find "${BINS_DIR}" -name "*combined-efi.img.gz" | grep ext4 | head -1)
@@ -511,7 +511,7 @@ echo ""
 echo "── 書き込み方法 ──────────────────────────────────"
 case "${DEVICE_PROFILE}" in
     x86_64)
-        echo "  # USB / ディスクへの書き込み（/dev/sdX を要確認）:"
+        echo "  # USB / ディスクへの書き込み(/dev/sdX を要確認):"
         echo "  gunzip -c ${BUILD_DIR}/openwrt-combined.img.gz | sudo dd of=/dev/sdX bs=4M status=progress && sync"
         echo ""
         echo "  # QEMU でのテスト:"
@@ -519,7 +519,7 @@ case "${DEVICE_PROFILE}" in
         echo "  qemu-system-x86_64 -m 256M -drive file=${BUILD_DIR}/images/openwrt-*combined-efi*.img,format=raw -nographic"
         ;;
     rpi*)
-        echo "  # microSD / USB への書き込み（/dev/sdX または /dev/mmcblkX を要確認）:"
+        echo "  # microSD / USB への書き込み(/dev/sdX または /dev/mmcblkX を要確認):"
         echo "  gunzip -c ${BUILD_DIR}/openwrt-combined.img.gz | sudo dd of=/dev/sdX bs=4M status=progress && sync"
         echo ""
         echo "  ※ ラズパイは起動後 SSH でアクセス:"
