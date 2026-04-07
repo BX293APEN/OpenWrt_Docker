@@ -6,7 +6,13 @@
 # 実行前にやること:
 #   1. USB または microSD を挿す
 #   2. lsblk でデバイス名を確認する
-#   3. sudo bash morning.sh
+#   3. sudo bash morning.sh [オプション]
+#
+# オプション:
+#   --size <MB>   書き込み後の rootfs パーティション上限サイズ(MB単位)
+#                 例: --size 2048  → 2 GB に制限
+#                 例: --size 0     → デバイス全容量を使う(デフォルト)
+#                 .env の USB_SIZE_MB でも指定可能(コマンドライン引数が優先)
 #
 # 警告: 選択したデバイスは完全消去されます！
 #
@@ -18,15 +24,53 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────
-# .env の読み込み(DEVICE_PROFILE を取得)
+# コマンドライン引数パース
+# ─────────────────────────────────────────────
+# --size <MB> : rootfs パーティションの上限サイズ(MB)
+#               0 または未指定 → デバイス全容量を使う
+_CLI_SIZE_MB=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --size)
+            [[ -n "${2:-}" ]] || { echo "[ERROR] --size にはMB数を指定してください" >&2; exit 1; }
+            _CLI_SIZE_MB="$2"
+            shift 2
+            ;;
+        --size=*)
+            _CLI_SIZE_MB="${1#--size=}"
+            shift
+            ;;
+        *)
+            echo "[ERROR] 不明なオプション: $1" >&2
+            echo "使い方: sudo bash morning.sh [--size <MB>]" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# ─────────────────────────────────────────────
+# .env の読み込み(DEVICE_PROFILE / USB_SIZE_MB を取得)
 # ─────────────────────────────────────────────
 ENV_FILE="$(dirname "$0")/.env"
 DEVICE_PROFILE="x86_64"   # .env が無い場合のデフォルト
+USB_SIZE_MB=0              # 0 = デバイス全容量を使う
 
 if [[ -f "${ENV_FILE}" ]]; then
     # コメント・空行を除いて読み込む
     _dp=$(grep -E '^DEVICE_PROFILE=' "${ENV_FILE}" | tail -1 | cut -d= -f2 | tr -d '"'"'" | xargs)
     [[ -n "${_dp}" ]] && DEVICE_PROFILE="${_dp}"
+
+    _sz=$(grep -E '^USB_SIZE_MB=' "${ENV_FILE}" | tail -1 | cut -d= -f2 | tr -d '"'"'" | xargs)
+    [[ -n "${_sz}" ]] && USB_SIZE_MB="${_sz}"
+fi
+
+# コマンドライン引数は .env より優先
+[[ -n "${_CLI_SIZE_MB}" ]] && USB_SIZE_MB="${_CLI_SIZE_MB}"
+
+# 値の検証
+if ! [[ "${USB_SIZE_MB}" =~ ^[0-9]+$ ]]; then
+    echo "[ERROR] USB_SIZE_MB は 0 以上の整数で指定してください: ${USB_SIZE_MB}" >&2
+    exit 1
 fi
 
 # ─────────────────────────────────────────────
@@ -74,6 +118,11 @@ echo "============================================"
 log "morning.sh 開始"
 echo "  DEVICE_PROFILE: ${DEVICE_PROFILE}"
 echo "  イメージ      : ${IMG_GZ:-(未検出)}"
+if [[ "${USB_SIZE_MB}" -eq 0 ]]; then
+    echo "  容量制限      : なし(デバイス全容量を使用)"
+else
+    echo "  容量制限      : ${USB_SIZE_MB} MB"
+fi
 echo "============================================"
 
 # ─────────────────────────────────────────────
@@ -143,6 +192,11 @@ lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,LABEL "${USB_DEV}" || true
 echo ""
 echo "  書き込むイメージ: ${IMG_GZ} (${IMG_SIZE})"
 echo "  デバイス        : ${DEVICE_PROFILE}"
+if [[ "${USB_SIZE_MB}" -eq 0 ]]; then
+    echo "  rootfs サイズ   : デバイス全容量(制限なし)"
+else
+    echo "  rootfs サイズ   : ${USB_SIZE_MB} MB に制限"
+fi
 echo "========================================================"
 read -rp "本当に続けますか？ (yes と入力して Enter): " CONFIRM
 [[ "$CONFIRM" == "yes" ]] || { echo "中止しました。"; exit 0; }
@@ -173,11 +227,94 @@ log "書き込み後のデバイス状態:"
 lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL "${USB_DEV}" || true
 
 # ─────────────────────────────────────────────
+# 6. rootfs パーティションのサイズ調整
+#
+#    USB_SIZE_MB=0  → 何もしない(イメージそのまま or 手動で拡張)
+#    USB_SIZE_MB>0  → 最後のパーティション(rootfs)を指定サイズに変更し
+#                     ext4 ならファイルシステムも resize2fs で拡張する
+#
+#    ※ OpenWrt x86_64 の combined.img は通常2パーティション構成:
+#       sda1 = BIOS/EFI boot,  sda2 = rootfs (ext4)
+#    ※ rpi の factory.img も同様の2パーティション構成
+# ─────────────────────────────────────────────
+if [[ "${USB_SIZE_MB}" -gt 0 ]]; then
+    log "rootfs パーティションを ${USB_SIZE_MB} MB に調整します..."
+
+    # parted / resize2fs の存在確認
+    for _cmd in parted resize2fs e2fsck; do
+        command -v "${_cmd}" &>/dev/null \
+            || err "${_cmd} が見つかりません。apt install parted e2fsprogs で導入してください。"
+    done
+
+    # デバイス全体のサイズ(MB)を取得
+    _dev_total_mb=$(( $(blockdev --getsize64 "${USB_DEV}") / 1024 / 1024 ))
+    log "  デバイス総容量: ${_dev_total_mb} MB"
+
+    if [[ "${USB_SIZE_MB}" -gt "${_dev_total_mb}" ]]; then
+        warn "  指定サイズ(${USB_SIZE_MB} MB)がデバイス容量(${_dev_total_mb} MB)を超えています。"
+        warn "  デバイス全容量を上限として調整します。"
+        USB_SIZE_MB="${_dev_total_mb}"
+    fi
+
+    # 最後のパーティション番号とデバイスパスを特定
+    _last_partnum=$(parted -s "${USB_DEV}" print \
+        | awk '/^ *[0-9]/{last=$1} END{print last}')
+    _last_part="${USB_DEV}${_last_partnum}"
+    # nvme / mmcblk は "p" セパレータが必要 (例: /dev/mmcblk0p2)
+    if [[ "${USB_DEV}" =~ (nvme|mmcblk) ]]; then
+        _last_part="${USB_DEV}p${_last_partnum}"
+    fi
+    log "  対象パーティション: ${_last_part} (No.${_last_partnum})"
+
+    # パーティションの開始位置を取得(MB単位・parted の "MiB" 表記から変換)
+    _start_mb=$(parted -s "${USB_DEV}" unit MiB print \
+        | awk -v n="${_last_partnum}" '$1==n{gsub(/MiB/,"",$2); printf "%d", $2}')
+    log "  パーティション開始: ${_start_mb} MiB"
+
+    # 終了位置 = 開始 + 指定サイズ (1MiB 手前を上限として安全マージンを確保)
+    _end_mb=$(( _start_mb + USB_SIZE_MB - 1 ))
+    if [[ "${_end_mb}" -ge "${_dev_total_mb}" ]]; then
+        _end_mb=$(( _dev_total_mb - 1 ))
+        log "  終端をデバイス末尾(${_end_mb} MiB)に調整しました"
+    fi
+
+    log "  リサイズ: ${_start_mb} MiB → ${_end_mb} MiB (${USB_SIZE_MB} MB)"
+
+    # parted でパーティションをリサイズ
+    parted -s "${USB_DEV}" resizepart "${_last_partnum}" "${_end_mb}MiB"
+    partprobe "${USB_DEV}" 2>/dev/null || true
+    sleep 1
+
+    # ext4 ならファイルシステムも拡張
+    _fstype=$(lsblk -no FSTYPE "${_last_part}" 2>/dev/null || true)
+    if [[ "${_fstype}" == "ext4" || "${_fstype}" == "ext3" || "${_fstype}" == "ext2" ]]; then
+        log "  e2fsck でファイルシステムを検査..."
+        e2fsck -f -y "${_last_part}" || true   # エラーでもリサイズは試みる
+        log "  resize2fs でファイルシステムを拡張..."
+        resize2fs "${_last_part}"
+        log "  ファイルシステム拡張完了"
+    elif [[ -n "${_fstype}" ]]; then
+        warn "  fstype=${_fstype} は自動拡張に非対応。パーティションのみリサイズしました。"
+    else
+        warn "  ファイルシステムタイプを検出できませんでした。パーティションのみリサイズしました。"
+    fi
+
+    log "リサイズ後のデバイス状態:"
+    lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL "${USB_DEV}" || true
+else
+    log "USB_SIZE_MB=0 のため、パーティションリサイズをスキップします"
+    log "(必要であれば手動で parted / resize2fs を実行してください)"
+fi
+
+# ─────────────────────────────────────────────
 # 完了メッセージ
 # ─────────────────────────────────────────────
 echo ""
 echo "============================================"
 log "完了！ OpenWrt を ${USB_DEV} に書き込みました"
+if [[ "${USB_SIZE_MB}" -gt 0 ]]; then
+    log "  rootfs を ${USB_SIZE_MB} MB に調整しました"
+fi
 echo ""
 
 case "${DEVICE_PROFILE}" in
