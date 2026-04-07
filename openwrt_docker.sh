@@ -102,6 +102,19 @@ WAN_GATEWAY="${WAN_GATEWAY:-}"
 PPPOE_USER="${PPPOE_USER:-}"
 PPPOE_PASS="${PPPOE_PASS:-}"
 
+# ── NICインターフェース自動検出設定 ──
+# NIC検出の優先順位:
+#   1. ネットワークアドレス条件 (WAN_NETWORKにWANが属するサブネットを指定)
+#   2. WAN接続優先 (デフォルトルートを持つNICをWANと見なす)
+#   3. インターフェース名指定 (WAN_IFACE / LAN_IFACE)
+#
+# WAN_NETWORK: WANが属するネットワーク CIDR (例: 192.168.10.0/24)
+#              空欄なら自動 (WAN_IP から算出 or デフォルトルート優先)
+WAN_NETWORK="${WAN_NETWORK:-}"
+# WAN_IFACE / LAN_IFACE: 自動検出が全て失敗した場合のフォールバック名
+WAN_IFACE="${WAN_IFACE:-eth1}"
+LAN_IFACE="${LAN_IFACE:-eth0}"
+
 # ── ロケール・タイムゾーン ──
 TIME_ZONE="${TIME_ZONE:-Asia/Tokyo}"
 OPENWRT_TZ="${OPENWRT_TZ:-JST-9}"
@@ -196,6 +209,8 @@ mkdir -p \
     "${CUSTOM}/usr/bin"
 
 # ── 3-1. ネットワーク設定 (/etc/config/network) ──────────────────────────
+# ifname は初回起動時に 10-detect-ifaces.sh が書き換えるため、
+# ここでは LAN_IFACE / WAN_IFACE のフォールバック値を埋める。
 cat > "${CUSTOM}/etc/config/network" << NETEOF
 config interface 'loopback'
     option ifname 'lo'
@@ -208,7 +223,7 @@ config globals 'globals'
 
 config interface 'lan'
     option type 'bridge'
-    option ifname 'eth0'
+    option ifname '${LAN_IFACE}'
     option proto 'static'
     option ipaddr '${LAN_IP}'
     option netmask '${LAN_NETMASK}'
@@ -227,7 +242,7 @@ echo "    list dns '${LAN_DNS_SPACE}'" >> "${CUSTOM}/etc/config/network"
 cat >> "${CUSTOM}/etc/config/network" << WANEOF
 
 config interface 'wan'
-    option ifname 'eth1'
+    option ifname '${WAN_IFACE}'
     option proto '${WAN_PROTO}'
 WANEOF
 
@@ -243,14 +258,137 @@ case "${WAN_PROTO}" in
         ;;
 esac
 
-cat >> "${CUSTOM}/etc/config/network" << 'WAN6EOF'
+cat >> "${CUSTOM}/etc/config/network" << WANEOF
 
 config interface 'wan6'
-    option ifname 'eth1'
+    option ifname '${WAN_IFACE}'
     option proto 'dhcpv6'
-WAN6EOF
+WANEOF
 
-log "ネットワーク設定完了: LAN=${LAN_IP}/${LAN_NETMASK}, WAN=${WAN_PROTO}"
+log "ネットワーク設定完了: LAN=${LAN_IP}/${LAN_NETMASK} (iface=${LAN_IFACE}), WAN=${WAN_PROTO} (iface=${WAN_IFACE})"
+
+# ── 3-1b. NICインターフェース自動検出スクリプト (/etc/uci-defaults/10-detect-ifaces.sh)
+# 優先順位:
+#   1. WAN_NETWORK (CIDR) にアドレスが属するNICをWANとみなす
+#   2. デフォルトルート(ゲートウェイ)を持つNICをWANとみなす
+#   3. 上記で判定できなければ WAN_IFACE / LAN_IFACE をそのまま使用
+cat > "${CUSTOM}/etc/uci-defaults/10-detect-ifaces.sh" << DETECTEOF
+#!/bin/sh
+# =============================================================================
+# 10-detect-ifaces.sh  ―  NICインターフェース自動検出
+# 初回起動時に /etc/config/network の ifname を実NICに書き換える
+#
+# 検出優先順位:
+#   1. ネットワークアドレス条件 (WAN_NETWORK が指定されている場合)
+#   2. WAN接続優先 (デフォルトルートを持つNICをWANとみなす)
+#   3. インターフェース名指定 (フォールバック: そのまま使用)
+# =============================================================================
+
+WAN_NETWORK='${WAN_NETWORK}'
+WAN_IFACE_FALLBACK='${WAN_IFACE}'
+LAN_IFACE_FALLBACK='${LAN_IFACE}'
+
+logger -t detect-ifaces "NICインターフェース自動検出を開始します"
+
+# ── ヘルパー: CIDR形式をネットワークアドレスに変換して一致確認 ─────────────
+# 引数: \$1=IPアドレス  \$2=CIDR (例: 192.168.10.0/24)
+# 戻り値: 0=同じネットワーク / 1=異なる
+_ip_in_network() {
+    local ip="\$1" cidr="\$2"
+    local net="\${cidr%/*}" prefix="\${cidr#*/}"
+
+    # IPをu32整数に変換
+    _ip_to_int() {
+        local a b c d
+        IFS=. read -r a b c d <<EOF
+\$1
+EOF
+        echo \$(( (a<<24) | (b<<16) | (c<<8) | d ))
+    }
+
+    local mask_int ip_int net_int
+    mask_int=\$(( 0xFFFFFFFF << (32 - prefix) & 0xFFFFFFFF ))
+    ip_int=\$(_ip_to_int "\$ip")
+    net_int=\$(_ip_to_int "\$net")
+
+    [ \$(( ip_int & mask_int )) -eq \$(( net_int & mask_int )) ]
+}
+
+# ── 全物理NICを列挙 (lo / 仮想NICを除外) ──────────────────────────────────
+_list_phys_nics() {
+    for d in /sys/class/net/*/; do
+        local name="\${d%/}" ; name="\${name##*/}"
+        [ "\$name" = "lo" ] && continue
+        # 仮想/ブリッジ/VLAN等を除外
+        [ -d "\${d}wireless" ] && continue          # Wi-Fi は除外
+        [ -f "\${d}tun_flags" ] && continue         # TUN/TAP
+        [ -d "\${d}bridge" ] && continue            # ブリッジ
+        echo "\$name"
+    done
+}
+
+DETECTED_WAN=""
+DETECTED_LAN=""
+
+# ── 優先度1: ネットワークアドレス条件 ─────────────────────────────────────
+if [ -n "\$WAN_NETWORK" ]; then
+    logger -t detect-ifaces "優先度1: ネットワーク条件で検出 (WAN_NETWORK=\$WAN_NETWORK)"
+    for nic in \$(_list_phys_nics); do
+        # NICが持つIPアドレスを取得
+        nic_ip=\$(ip -4 addr show "\$nic" 2>/dev/null | awk '/inet /{split(\$2,a,"/"); print a[1]; exit}')
+        [ -z "\$nic_ip" ] && continue
+        if _ip_in_network "\$nic_ip" "\$WAN_NETWORK"; then
+            DETECTED_WAN="\$nic"
+            logger -t detect-ifaces "  WAN検出(ネットワーク条件): \$nic (\$nic_ip は \$WAN_NETWORK に属する)"
+            break
+        fi
+    done
+fi
+
+# ── 優先度2: デフォルトルート(WAN接続)を持つNIC ───────────────────────────
+if [ -z "\$DETECTED_WAN" ]; then
+    logger -t detect-ifaces "優先度2: デフォルトルートでWAN検出"
+    gw_nic=\$(ip route show default 2>/dev/null | awk '/default via/{print \$5; exit}')
+    if [ -n "\$gw_nic" ]; then
+        DETECTED_WAN="\$gw_nic"
+        logger -t detect-ifaces "  WAN検出(デフォルトルート): \$gw_nic"
+    fi
+fi
+
+# ── 優先度3: フォールバック ────────────────────────────────────────────────
+if [ -z "\$DETECTED_WAN" ]; then
+    logger -t detect-ifaces "優先度3: フォールバック使用 (WAN=\$WAN_IFACE_FALLBACK)"
+    DETECTED_WAN="\$WAN_IFACE_FALLBACK"
+fi
+
+# ── LANはWAN以外の最初のNIC ───────────────────────────────────────────────
+for nic in \$(_list_phys_nics); do
+    [ "\$nic" = "\$DETECTED_WAN" ] && continue
+    DETECTED_LAN="\$nic"
+    break
+done
+
+if [ -z "\$DETECTED_LAN" ]; then
+    logger -t detect-ifaces "LAN NICが見つかりません。フォールバック使用 (LAN=\$LAN_IFACE_FALLBACK)"
+    DETECTED_LAN="\$LAN_IFACE_FALLBACK"
+fi
+
+logger -t detect-ifaces "検出結果: WAN=\$DETECTED_WAN, LAN=\$DETECTED_LAN"
+
+# ── /etc/config/network を書き換え ──────────────────────────────────────
+# uci で ifname を更新する
+uci set network.lan.ifname="\$DETECTED_LAN"
+uci set network.wan.ifname="\$DETECTED_WAN"
+uci set network.wan6.ifname="\$DETECTED_WAN"
+uci commit network
+
+logger -t detect-ifaces "network設定を更新しました: LAN=\$DETECTED_LAN, WAN=\$DETECTED_WAN"
+
+exit 0
+DETECTEOF
+chmod +x "${CUSTOM}/etc/uci-defaults/10-detect-ifaces.sh"
+
+log "NICインターフェース自動検出スクリプト設定完了 (WAN_NETWORK='${WAN_NETWORK}', fallback: WAN=${WAN_IFACE} LAN=${LAN_IFACE})"
 
 # ── 3-2. SSH設定 (Dropbear) /etc/config/dropbear ─────────────────────────
 # WAN_SSH=true の場合は Interface 制限を外す(全NICで待ち受け)

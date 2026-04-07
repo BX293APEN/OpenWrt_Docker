@@ -49,6 +49,10 @@ services:
       - WAN_GATEWAY=${WAN_GATEWAY}
       - PPPOE_USER=${PPPOE_USER}
       - PPPOE_PASS=${PPPOE_PASS}
+      # ── NICインターフェース自動検出 ──
+      - WAN_NETWORK=${WAN_NETWORK}
+      - WAN_IFACE=${WAN_IFACE}
+      - LAN_IFACE=${LAN_IFACE}
       # ── ロケール・タイムゾーン ──
       - TIME_ZONE=${TIME_ZONE}
       - OPENWRT_TZ=${OPENWRT_TZ}

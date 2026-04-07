@@ -97,7 +97,8 @@ fi
 # ─────────────────────────────────────────────
 echo ""
 echo "接続済みデバイス一覧:"
-lsblk -po NAME,SIZE,TYPE,LABEL,MOUNTPOINT | grep -E 'NAME|disk'
+lsblk -po NAME,SIZE,LABEL,MOUNTPOINT | head -n1 && \
+lsblk -po NAME,SIZE,LABEL,MOUNTPOINT | grep -E '^(/dev/sd|/dev/nvme)|^├─|^└─'
 
 echo ""
 case "${DEVICE_PROFILE}" in
