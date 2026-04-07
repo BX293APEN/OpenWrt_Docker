@@ -199,7 +199,7 @@ log "  ROOT UUID: $ROOT_UUID"
 log "  EFI  UUID: $EFI_UUID"
 
 # ─────────────────────────────────────────────
-# 8. GRUB インストール（任意）
+# 8. GRUB インストール(任意)
 #    OpenWrt は通常 extlinux/syslinux を使うが、
 #    EFI環境では GRUB の方が互換性が高い
 # ─────────────────────────────────────────────

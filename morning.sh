@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# morning.sh  ―  朝起きたら実行（ホストUbuntu上で sudo bash morning.sh）
+# morning.sh  ―  朝起きたら実行(ホストUbuntu上で sudo bash morning.sh)
 # 役割: OpenWrt のビルド成果物を USB / microSD に書き込む
 #
 # 実行前にやること:
@@ -11,14 +11,14 @@
 # 警告: 選択したデバイスは完全消去されます！
 #
 # DEVICE_PROFILE に応じて書き込み方法が自動で変わります:
-#   x86_64 … combined.img.gz を dd で直接書き込み（GRUB込み）
-#   rpi*   … factory.img.gz  を dd で直接書き込み（U-Boot込み）
+#   x86_64 … combined.img.gz を dd で直接書き込み(GRUB込み)
+#   rpi*   … factory.img.gz  を dd で直接書き込み(U-Boot込み)
 # =============================================================================
 
 set -euo pipefail
 
 # ─────────────────────────────────────────────
-# .env の読み込み（DEVICE_PROFILE を取得）
+# .env の読み込み(DEVICE_PROFILE を取得)
 # ─────────────────────────────────────────────
 ENV_FILE="$(dirname "$0")/.env"
 DEVICE_PROFILE="x86_64"   # .env が無い場合のデフォルト
@@ -30,19 +30,19 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 # ─────────────────────────────────────────────
-# パス設定（DEVICE_PROFILE に応じて成果物を選択）
+# パス設定(DEVICE_PROFILE に応じて成果物を選択)
 # ─────────────────────────────────────────────
 BUILD_DIR="./build"
 DONE_FLAG="${BUILD_DIR}/FLAGS/.build_done"
 LOGFILE="${BUILD_DIR}/morning.log"
 MOUNT_ROOT="/mnt/openwrt"
 
-# 成果物ファイルを検索（ビルド時にコピーされた openwrt-combined.img.gz を優先）
+# 成果物ファイルを検索(ビルド時にコピーされた openwrt-combined.img.gz を優先)
 IMG_GZ=""
 _find_image() {
     # 1. build/ 直下の openwrt-combined.img.gz
     [[ -f "${BUILD_DIR}/openwrt-combined.img.gz" ]] && { IMG_GZ="${BUILD_DIR}/openwrt-combined.img.gz"; return; }
-    # 2. build/images/ 以下を検索（デバイス別に優先順位）
+    # 2. build/images/ 以下を検索(デバイス別に優先順位)
     case "${DEVICE_PROFILE}" in
         x86_64)
             IMG_GZ=$(find "${BUILD_DIR}/images" -name "*combined-efi*.img.gz" 2>/dev/null | grep ext4 | head -1)
@@ -61,7 +61,7 @@ _find_image() {
 _find_image
 
 # ─────────────────────────────────────────────
-# ログ設定（開始前に mkdir だけ）
+# ログ設定(開始前に mkdir だけ)
 # ─────────────────────────────────────────────
 mkdir -p "${BUILD_DIR}"
 exec > >(tee -a "$LOGFILE") 2>&1
@@ -73,7 +73,7 @@ err()  { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2; exit 1; }
 echo "============================================"
 log "morning.sh 開始"
 echo "  DEVICE_PROFILE: ${DEVICE_PROFILE}"
-echo "  イメージ      : ${IMG_GZ:-（未検出）}"
+echo "  イメージ      : ${IMG_GZ:-(未検出)}"
 echo "============================================"
 
 # ─────────────────────────────────────────────
@@ -153,7 +153,7 @@ read -rp "本当に続けますか？ (yes と入力して Enter): " CONFIRM
 #            全部入っているので dd 一発でOK。chrootもGRUBインストールも不要。
 #    rpi*  : factory.img.gz も同様にU-Boot+パーティション込み。
 # ─────────────────────────────────────────────
-log "書き込み開始（イメージサイズの展開に数分かかります）..."
+log "書き込み開始(イメージサイズの展開に数分かかります)..."
 log "  ${IMG_GZ} → ${USB_DEV}"
 
 gunzip -c "${IMG_GZ}" \
@@ -195,7 +195,7 @@ case "${DEVICE_PROFILE}" in
         echo "次のステップ:"
         echo "  1. microSD / USB を抜いてラズパイに差す"
         echo "  2. 電源ON"
-        echo "  3. しばらく待つと起動します（初回は少し時間がかかります）"
+        echo "  3. しばらく待つと起動します(初回は少し時間がかかります)"
         echo ""
         echo "起動後のアクセス:"
         echo "  SSH : ssh root@<LAN_IP>   (.envのLAN_IPを確認)"
