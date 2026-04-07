@@ -29,7 +29,7 @@ RUN apt update && \
         git \
         libncurses-dev \
         libssl-dev \
-        python3-distutils \
+#        python3-distutils \
         python3-setuptools \
         python3-dev \
         rsync \

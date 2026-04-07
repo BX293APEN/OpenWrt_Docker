@@ -30,6 +30,7 @@ services:
     environment:
       # ── ビルド設定 ──
       - OPENWRT_VERSION=${OPENWRT_VERSION}
+      - EXT=${EXT}
       - DEVICE_PROFILE=${DEVICE_PROFILE}
       - TARGET=${TARGET}
       - SUBTARGET=${SUBTARGET}

@@ -23,6 +23,7 @@ set -eo pipefail
 
 # ── ビルド設定 ──
 OPENWRT_VERSION="${OPENWRT_VERSION:-23.05.3}"
+EXT="${EXT:-tar.xz}"
 DEVICE_PROFILE="${DEVICE_PROFILE:-x86_64}"
 OPENWRT_MIRROR="${OPENWRT_MIRROR:-https://downloads.openwrt.org}"
 CPU_CORE="${CPU_CORE:-4}"
@@ -156,15 +157,15 @@ chmod 777 -R "${FLAG_DIR}"
 # 1. ImageBuilder のダウンロード
 # ─────────────────────────────────────────────
 IB_NAME="openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64"
-IB_URL="${OPENWRT_MIRROR}/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}.tar.xz"
-IB_ARCHIVE="${BUILD_DIR}/${IB_NAME}.tar.xz"
+IB_URL="${OPENWRT_MIRROR}/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}.${EXT}"
+IB_ARCHIVE="${BUILD_DIR}/${IB_NAME}.${EXT}"
 
 log "ImageBuilder URL: ${IB_URL}"
 
 if [[ -f "${IB_ARCHIVE}" ]]; then
     log "キャッシュ済み: ${IB_ARCHIVE}、ダウンロードをスキップ"
 else
-    log "ダウンロード中: ${IB_NAME}.tar.xz"
+    log "ダウンロード中: ${IB_NAME}.${EXT}"
     wget -c "${IB_URL}" -O "${IB_ARCHIVE}.tmp" || err "ImageBuilder のダウンロードに失敗しました。バージョン・ターゲットを確認してください。"
     mv "${IB_ARCHIVE}.tmp" "${IB_ARCHIVE}"
 fi
@@ -173,7 +174,7 @@ fi
 # 2. 展開
 # ─────────────────────────────────────────────
 if [[ ! -d "${IB_DIR}" ]]; then
-    log "展開中: ${IB_NAME}.tar.xz"
+    log "展開中: ${IB_NAME}.${EXT}"
     mkdir -p "${IB_DIR}"
     tar xf "${IB_ARCHIVE}" -C "${IB_DIR}" --strip-components=1
 else
