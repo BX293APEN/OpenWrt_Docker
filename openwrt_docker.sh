@@ -95,6 +95,7 @@ LAN_IP="${LAN_IP:-192.168.1.1}"
 LAN_NETMASK="${LAN_NETMASK:-255.255.255.0}"
 LAN_GATEWAY="${LAN_GATEWAY:-}"
 LAN_DNS="${LAN_DNS:-8.8.8.8}"
+DNS_SERVER="${DNS_SERVER:-LAN_DNS}"
 WAN_PROTO="${WAN_PROTO:-dhcp}"
 WAN_IP="${WAN_IP:-}"
 WAN_NETMASK="${WAN_NETMASK:-}"
@@ -411,6 +412,7 @@ SSHEOF
     log "SSH設定完了: port=${SSH_PORT} (LANのみ)"
 fi
 
+
 # ── 3-3. タイムゾーン設定 /etc/config/system ────────────────────────────
 cat > "${CUSTOM}/etc/config/system" << SYSEOF
 config system
@@ -423,11 +425,16 @@ config system
 config timeserver 'ntp'
     option enabled '1'
     option enable_server '0'
-    list server '0.openwrt.pool.ntp.org'
-    list server '1.openwrt.pool.ntp.org'
-    list server '2.openwrt.pool.ntp.org'
-    list server '3.openwrt.pool.ntp.org'
 SYSEOF
+
+NTP_SERVER="${NTP_SERVER:-0.openwrt.pool.ntp.org,1.openwrt.pool.ntp.org,2.openwrt.pool.ntp.org,3.openwrt.pool.ntp.org}"
+
+IFS=',' read -ra NTP_LIST <<< "${NTP_SERVER}"
+for ntp in "${NTP_LIST[@]}"; do
+    ntp="$(echo "$dns" | tr -d ' ')"
+    [[ -n "$ntp" ]] && echo "    list server '${ntp}'" >> "${CUSTOM}/etc/config/system"
+done
+
 
 log "タイムゾーン設定完了: ${OPENWRT_TZ}"
 

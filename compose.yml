@@ -49,6 +49,8 @@ services:
       - WAN_GATEWAY=${WAN_GATEWAY}
       - PPPOE_USER=${PPPOE_USER}
       - PPPOE_PASS=${PPPOE_PASS}
+      - DNS_SERVER=${DNS_SERVER}
+      - NTP_SERVER=${NTP_SERVER}
       # ── NICインターフェース自動検出 ──
       - WAN_NETWORK=${WAN_NETWORK}
       - WAN_IFACE=${WAN_IFACE}
