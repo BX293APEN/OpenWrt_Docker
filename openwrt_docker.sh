@@ -259,6 +259,16 @@ case "${WAN_PROTO}" in
         ;;
 esac
 
+# DNS_SERVER: OpenWrt本体がDNS解決に使うサーバー(WANインターフェースに設定)
+# netifd が /tmp/resolv.conf.d/resolv.conf.auto に書き出し、dnsmasq が参照する
+if [[ -n "${DNS_SERVER}" ]]; then
+    IFS=',' read -ra DNS_LIST <<< "${DNS_SERVER}"
+    for dns in "${DNS_LIST[@]}"; do
+        dns="$(echo "$dns" | tr -d ' ')"
+        [[ -n "$dns" ]] && echo "    list dns '${dns}'" >> "${CUSTOM}/etc/config/network"
+    done
+fi
+
 cat >> "${CUSTOM}/etc/config/network" << WANEOF
 
 config interface 'wan6'
@@ -431,7 +441,7 @@ NTP_SERVER="${NTP_SERVER:-0.openwrt.pool.ntp.org,1.openwrt.pool.ntp.org,2.openwr
 
 IFS=',' read -ra NTP_LIST <<< "${NTP_SERVER}"
 for ntp in "${NTP_LIST[@]}"; do
-    ntp="$(echo "$dns" | tr -d ' ')"
+    ntp="$(echo "$ntp" | tr -d ' ')"
     [[ -n "$ntp" ]] && echo "    list server '${ntp}'" >> "${CUSTOM}/etc/config/system"
 done
 
