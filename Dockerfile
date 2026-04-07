@@ -41,6 +41,7 @@ RUN apt update && \
         xz-utils \
         tar \
         gzip \
+        zstd \
         dosfstools \
         e2fsprogs \
         util-linux \
