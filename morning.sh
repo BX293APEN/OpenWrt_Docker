@@ -218,8 +218,23 @@ sync
 log "sync 完了"
 
 # ─────────────────────────────────────────────
-# 5. パーティションテーブルを再読み込み
+# 5. GPT修復 + パーティションテーブルを再読み込み
+#
+#    dd でイメージを書き込むと、GPT のバックアップヘッダーが
+#    元イメージのサイズ位置に残ったままになる。
+#    これが残っていると parted が resizepart を拒否するため、
+#    sgdisk -e でバックアップGPTをデバイス末尾に移動して修復する。
 # ─────────────────────────────────────────────
+if command -v sgdisk &>/dev/null; then
+    log "GPT バックアップヘッダーをデバイス末尾に修復中..."
+    sgdisk -e "${USB_DEV}" 2>&1 | grep -v "^$" | while read -r line; do
+        log "  sgdisk: ${line}"
+    done || true
+else
+    warn "sgdisk が見つかりません。apt install gdisk で導入することを推奨します。"
+    warn "GPT が壊れたままだと parted のリサイズが失敗する場合があります。"
+fi
+
 partprobe "${USB_DEV}" 2>/dev/null || true
 sleep 1
 
