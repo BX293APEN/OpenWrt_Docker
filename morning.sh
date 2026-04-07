@@ -229,63 +229,96 @@ lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL "${USB_DEV}" || true
 # ─────────────────────────────────────────────
 # 6. rootfs パーティションのサイズ調整
 #
-#    USB_SIZE_MB=0  → 何もしない(イメージそのまま or 手動で拡張)
-#    USB_SIZE_MB>0  → 最後のパーティション(rootfs)を指定サイズに変更し
-#                     ext4 ならファイルシステムも resize2fs で拡張する
+#  【書き込み後のイメージサイズ】を基準に 4 ケースで動作:
+#
+#   ケース A: 指定サイズ > デバイス容量
+#             → 何もしない(書き込んだイメージのまま)
+#
+#   ケース B: 指定サイズ = 0  OR  指定サイズ >= デバイス容量
+#             → デバイス全容量を使うように rootfs を最大拡張
+#
+#   ケース C: 指定サイズ < 書き込みイメージの rootfs サイズ
+#             → 最小限(書き込み済みサイズのまま)。何もしない。
+#
+#   ケース D: 書き込みイメージの rootfs サイズ <= 指定サイズ <= デバイス容量
+#             → 指定サイズまで rootfs を拡張
 #
 #    ※ OpenWrt x86_64 の combined.img は通常2パーティション構成:
 #       sda1 = BIOS/EFI boot,  sda2 = rootfs (ext4)
 #    ※ rpi の factory.img も同様の2パーティション構成
 # ─────────────────────────────────────────────
-if [[ "${USB_SIZE_MB}" -gt 0 ]]; then
-    log "rootfs パーティションを ${USB_SIZE_MB} MB に調整します..."
 
-    # parted / resize2fs の存在確認
-    for _cmd in parted resize2fs e2fsck; do
-        command -v "${_cmd}" &>/dev/null \
-            || err "${_cmd} が見つかりません。apt install parted e2fsprogs で導入してください。"
-    done
+# parted / resize2fs の存在確認(リサイズが必要になる前に行う)
+for _cmd in parted resize2fs e2fsck blockdev; do
+    command -v "${_cmd}" &>/dev/null \
+        || err "${_cmd} が見つかりません。apt install parted e2fsprogs util-linux で導入してください。"
+done
 
-    # デバイス全体のサイズ(MB)を取得
-    _dev_total_mb=$(( $(blockdev --getsize64 "${USB_DEV}") / 1024 / 1024 ))
-    log "  デバイス総容量: ${_dev_total_mb} MB"
+# ── デバイス・パーティション情報を収集 ──────────────────────────
+_dev_total_mb=$(( $(blockdev --getsize64 "${USB_DEV}") / 1024 / 1024 ))
+log "  デバイス総容量: ${_dev_total_mb} MB"
 
-    if [[ "${USB_SIZE_MB}" -gt "${_dev_total_mb}" ]]; then
-        warn "  指定サイズ(${USB_SIZE_MB} MB)がデバイス容量(${_dev_total_mb} MB)を超えています。"
-        warn "  デバイス全容量を上限として調整します。"
-        USB_SIZE_MB="${_dev_total_mb}"
-    fi
+# 最後のパーティション番号とデバイスパスを特定
+_last_partnum=$(parted -s "${USB_DEV}" print \
+    | awk '/^ *[0-9]/{last=$1} END{print last}')
+_last_part="${USB_DEV}${_last_partnum}"
+# nvme / mmcblk は "p" セパレータが必要 (例: /dev/mmcblk0p2)
+if [[ "${USB_DEV}" =~ (nvme|mmcblk) ]]; then
+    _last_part="${USB_DEV}p${_last_partnum}"
+fi
+log "  対象パーティション: ${_last_part} (No.${_last_partnum})"
 
-    # 最後のパーティション番号とデバイスパスを特定
-    _last_partnum=$(parted -s "${USB_DEV}" print \
-        | awk '/^ *[0-9]/{last=$1} END{print last}')
-    _last_part="${USB_DEV}${_last_partnum}"
-    # nvme / mmcblk は "p" セパレータが必要 (例: /dev/mmcblk0p2)
-    if [[ "${USB_DEV}" =~ (nvme|mmcblk) ]]; then
-        _last_part="${USB_DEV}p${_last_partnum}"
-    fi
-    log "  対象パーティション: ${_last_part} (No.${_last_partnum})"
+# パーティションの開始・現在の終了位置を取得(MiB単位)
+_start_mb=$(parted -s "${USB_DEV}" unit MiB print \
+    | awk -v n="${_last_partnum}" '$1==n{gsub(/MiB/,"",$2); printf "%d", $2}')
+_current_end_mb=$(parted -s "${USB_DEV}" unit MiB print \
+    | awk -v n="${_last_partnum}" '$1==n{gsub(/MiB/,"",$3); printf "%d", $3}')
 
-    # パーティションの開始位置を取得(MB単位・parted の "MiB" 表記から変換)
-    _start_mb=$(parted -s "${USB_DEV}" unit MiB print \
-        | awk -v n="${_last_partnum}" '$1==n{gsub(/MiB/,"",$2); printf "%d", $2}')
-    log "  パーティション開始: ${_start_mb} MiB"
+# 書き込み済み rootfs パーティションの現在サイズ(MiB)
+_written_size_mb=$(( _current_end_mb - _start_mb ))
+log "  書き込み済み rootfs: 開始 ${_start_mb} MiB / 終了 ${_current_end_mb} MiB / サイズ ${_written_size_mb} MiB"
 
-    # 終了位置 = 開始 + 指定サイズ (1MiB 手前を上限として安全マージンを確保)
-    _end_mb=$(( _start_mb + USB_SIZE_MB - 1 ))
+# ── ケース分岐 ───────────────────────────────────────────────────
+
+# ケース A: 指定サイズ > デバイス容量 → 何もしない
+if [[ "${USB_SIZE_MB}" -gt "${_dev_total_mb}" ]]; then
+    warn "  指定サイズ(${USB_SIZE_MB} MB) > デバイス容量(${_dev_total_mb} MB)のため、リサイズをスキップします。"
+    log "  書き込んだイメージのままです。"
+
+# ケース B: 0 指定 OR 指定サイズ >= デバイス容量 → 全容量使用
+elif [[ "${USB_SIZE_MB}" -eq 0 || "${USB_SIZE_MB}" -ge "${_dev_total_mb}" ]]; then
+    log "  rootfs をデバイス全容量(${_dev_total_mb} MB)まで拡張します..."
+    # デバイス末尾の 1 MiB をパーティションテーブル保護領域として残す
+    _end_mb=$(( _dev_total_mb - 1 ))
+    _do_resize=1
+
+# ケース C: 指定サイズ < 書き込み済みサイズ → 最小限(何もしない)
+elif [[ "${USB_SIZE_MB}" -lt "${_written_size_mb}" ]]; then
+    warn "  指定サイズ(${USB_SIZE_MB} MB) < 書き込み済みサイズ(${_written_size_mb} MB)のため、リサイズをスキップします。"
+    log "  縮小はサポートしていません。書き込んだイメージのままです。"
+
+# ケース D: 書き込み済みサイズ <= 指定サイズ <= デバイス容量 → 指定サイズまで拡張
+else
+    log "  rootfs を ${USB_SIZE_MB} MB に拡張します..."
+    _end_mb=$(( _start_mb + USB_SIZE_MB ))
+    # デバイス末尾を超えないよう安全マージンを確保
     if [[ "${_end_mb}" -ge "${_dev_total_mb}" ]]; then
         _end_mb=$(( _dev_total_mb - 1 ))
         log "  終端をデバイス末尾(${_end_mb} MiB)に調整しました"
     fi
+    _do_resize=1
+fi
 
-    log "  リサイズ: ${_start_mb} MiB → ${_end_mb} MiB (${USB_SIZE_MB} MB)"
+# ── 実際のリサイズ処理 ────────────────────────────────────────────
+if [[ "${_do_resize:-0}" -eq 1 ]]; then
+    log "  リサイズ: ${_start_mb} MiB → ${_end_mb} MiB"
 
     # parted でパーティションをリサイズ
     parted -s "${USB_DEV}" resizepart "${_last_partnum}" "${_end_mb}MiB"
     partprobe "${USB_DEV}" 2>/dev/null || true
     sleep 1
 
-    # ext4 ならファイルシステムも拡張
+    # ext2/3/4 ならファイルシステムも拡張
     _fstype=$(lsblk -no FSTYPE "${_last_part}" 2>/dev/null || true)
     if [[ "${_fstype}" == "ext4" || "${_fstype}" == "ext3" || "${_fstype}" == "ext2" ]]; then
         log "  e2fsck でファイルシステムを検査..."
@@ -301,9 +334,6 @@ if [[ "${USB_SIZE_MB}" -gt 0 ]]; then
 
     log "リサイズ後のデバイス状態:"
     lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL "${USB_DEV}" || true
-else
-    log "USB_SIZE_MB=0 のため、パーティションリサイズをスキップします"
-    log "(必要であれば手動で parted / resize2fs を実行してください)"
 fi
 
 # ─────────────────────────────────────────────
@@ -312,8 +342,8 @@ fi
 echo ""
 echo "============================================"
 log "完了！ OpenWrt を ${USB_DEV} に書き込みました"
-if [[ "${USB_SIZE_MB}" -gt 0 ]]; then
-    log "  rootfs を ${USB_SIZE_MB} MB に調整しました"
+if [[ "${_do_resize:-0}" -eq 1 ]]; then
+    log "  rootfs を ${_end_mb:-?} MiB に調整しました"
 fi
 echo ""
 
