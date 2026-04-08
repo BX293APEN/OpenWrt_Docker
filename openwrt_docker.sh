@@ -544,7 +544,7 @@ PACKAGES="\
     vim-full \
     openssh-sftp-server \
     curl \
-    wget \
+    wget-ssl \
     ca-certificates \
     htop \
     lsblk \
