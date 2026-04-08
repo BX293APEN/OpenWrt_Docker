@@ -454,6 +454,12 @@ cat > "${CUSTOM}/etc/uci-defaults/99-custom-setup.sh" << UCIEOF
 #!/bin/sh
 # 初回起動時に一度だけ実行される設定スクリプト
 
+# ── /dev/null 修復 (Docker ビルド環境で壊れる場合がある) ──
+if [ ! -c /dev/null ]; then
+    rm -f /dev/null
+    mknod -m 666 /dev/null c 1 3
+fi
+
 # ── root パスワード設定 ──
 echo "root:${ROOT_PASSWORD}" | chpasswd 2>/dev/null || true
 
